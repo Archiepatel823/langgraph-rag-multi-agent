@@ -1,0 +1,32 @@
+"""LLM tool node — binds tools and forces a tool call."""
+from langchain_core.messages import SystemMessage, ToolMessage
+from state import State
+from llms import answer_LLM
+from tools import RAG, search_web, mcp_client
+
+
+async def get_tools() -> list:
+    """Fetch tools (RAG + web search + MCP tools)."""
+    mcp_tools = await mcp_client.get_tools()
+    tools = [RAG, search_web, *mcp_tools]
+    return tools
+
+
+async def llm_tool_node(state: State):
+    if isinstance(state["messages"][-1], ToolMessage):
+        return {"messages": [], "iteration_count": state.get("iteration_count", 0)}
+
+    tools = await get_tools()
+    resp = await answer_LLM.bind_tools(tools).ainvoke(
+        [SystemMessage(content=(
+            "You are an AI assistant with access to these tools:\n"
+            "- RAG: search uploaded documents / knowledge base\n"
+            "- search_web: look up current or real-time information\n"
+            "- python_tool: execute Python code\n\n"
+            "The user's query has already been classified as needing a tool. "
+            "Pick the single most relevant tool for the request and call it with "
+            "the correct arguments. Do not reply with plain text — always make a tool call."
+        ))] +
+        state["messages"][-6:]
+    )
+    return {"messages": [resp], "iteration_count": state.get("iteration_count", 0) + 1}
